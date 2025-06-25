@@ -1,0 +1,39 @@
+---
+- name: Patch Compliance Report
+  hosts: all
+  gather_facts: yes
+  become: true
+
+  vars:
+    output_file: /tmp/patch_report.json
+
+  tasks:
+
+    - name: Get compliance status
+      shell: "cat /etc/ansible/fact.d/site.fact | grep patchcompliance || echo 'patchcompliance: unknown'"
+      register: compliance_raw
+      ignore_errors: yes
+
+    - name: Get server IP
+      shell: hostname -I | awk '{print $1}'
+      register: ip_raw
+
+    - name: Get uptime
+      command: uptime -p
+      register: uptime_raw
+
+    - name: Set fact for Excel row
+      set_fact:
+        report_row:
+          ip: "{{ ip_raw.stdout }}"
+          hostname: "{{ ansible_hostname }}"
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel: "{{ ansible_kernel }}"
+          uptime: "{{ uptime_raw.stdout }}"
+          compliance: "{{ (compliance_raw.stdout | regex_search('patchcompliance:\\s*(\\S+)', '\\1')) | default('unknown') }}"
+
+    - name: Write report row to local JSON (for Excel conversion)
+      local_action:
+        module: copy
+        content: "{{ report_row | to_json }}"
+        dest: "/tmp/patch_{{ inventory_hostname }}.json"
