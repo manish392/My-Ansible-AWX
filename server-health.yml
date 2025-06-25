@@ -1,0 +1,99 @@
+---
+- name: Server Health Checkup
+  hosts: all
+  gather_facts: yes
+  become: true
+
+  vars:
+    health_report: "/tmp/server_health_report.txt"
+
+  tasks:
+
+    - name: Ensure report file is clean
+      file:
+        path: "{{ health_report }}"
+        state: absent
+
+    - name: Add server header to report
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "==== Health Check Report for {{ inventory_hostname }} ===="
+        create: yes
+        insertafter: EOF
+
+    - name: Get IP address
+      command: hostname -I
+      register: ip_output
+
+    - name: Get uptime
+      command: uptime -p
+      register: uptime_output
+
+    - name: Get kernel version
+      command: uname -r
+      register: kernel_output
+
+    - name: Get disk usage
+      command: df -h /
+      register: disk_output
+
+    - name: Get memory usage
+      shell: free -m | grep Mem
+      register: mem_output
+
+    - name: Get CPU load
+      command: uptime
+      register: cpu_output
+
+    - name: Ping default gateway
+      shell: ip route | grep default | awk '{print $3}' | xargs ping -c 2
+      register: ping_output
+      ignore_errors: yes
+
+    - name: Append IP to report
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "IP Address: {{ ip_output.stdout }}"
+        insertafter: EOF
+
+    - name: Append uptime to report
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "Uptime: {{ uptime_output.stdout }}"
+        insertafter: EOF
+
+    - name: Append Kernel version
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "Kernel Version: {{ kernel_output.stdout }}"
+        insertafter: EOF
+
+    - name: Append Disk Usage
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "Disk Usage:\n{{ disk_output.stdout }}"
+        insertafter: EOF
+
+    - name: Append Memory Usage
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "Memory Usage (MB):\n{{ mem_output.stdout }}"
+        insertafter: EOF
+
+    - name: Append CPU Load
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "CPU Load Info:\n{{ cpu_output.stdout }}"
+        insertafter: EOF
+
+    - name: Append Ping Status
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "Ping Gateway:\n{{ ping_output.stdout | default('Ping Failed') }}"
+        insertafter: EOF
+
+    - name: Add separator
+      lineinfile:
+        path: "{{ health_report }}"
+        line: "==========================================="
+        insertafter: EOF
