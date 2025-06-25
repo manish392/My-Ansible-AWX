@@ -1,0 +1,31 @@
+---
+- name: Gather Server Details
+  hosts: all
+  gather_facts: yes
+  become: yes
+
+  tasks:
+
+    - name: Get server uptime
+      command: uptime -p
+      register: uptime_output
+
+    - name: Set server facts
+      set_fact:
+        server_details:
+          ip: "{{ ansible_default_ipv4.address | default('N/A') }}"
+          hostname: "{{ ansible_hostname }}"
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel: "{{ ansible_kernel }}"
+          uptime: "{{ uptime_output.stdout }}"
+
+    - name: Create compliance JSON directory
+      file:
+        path: /tmp/compliance_json
+        state: directory
+        mode: '0755'
+
+    - name: Save server details to JSON file
+      copy:
+        content: "{{ server_details | to_nice_json }}"
+        dest: "/tmp/compliance_json/{{ inventory_hostname }}.json"
