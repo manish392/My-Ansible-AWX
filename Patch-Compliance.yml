@@ -1,0 +1,285 @@
+---
+# compliance_report.yml
+- name: Collect server compliance data
+  hosts: all
+  gather_facts: true
+  vars:
+    report_dir: "compliance_reports"
+    html_file: "{{ report_dir }}/compliance_report.html"
+    excel_file: "{{ report_dir }}/compliance_report.xlsx"
+
+  tasks:
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+      delegate_to: localhost
+      run_once: true
+
+    - name: Collect compliance status from site.fact
+      become: yes
+      ansible.builtin.shell: |
+        cat /etc/ansible/fact.d/site.fact 2>/dev/null | grep -i patchcompliance || echo "patchcompliance=unknown"
+      register: compliance_raw
+      changed_when: false
+
+    - name: Set compliance status
+      ansible.builtin.set_fact:
+        compliance_status: >
+          {% if 'patchcompliance=true' in compliance_raw.stdout.lower() %}
+            compliant
+          {% elif 'patchcompliance=false' in compliance_raw.stdout.lower() %}
+            non-compliant
+          {% else %}
+            unknown
+          {% endif %}
+
+    - name: Create human-readable uptime
+      ansible.builtin.set_fact:
+        uptime_human: "{{ ansible_uptime_seconds | int | ansible.utils.seconds_to_time() }}"
+
+- name: Generate compliance report
+  hosts: localhost
+  gather_facts: false
+  vars:
+    styles: >
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          margin: 40px;
+          background-color: #f8f9fa;
+          color: #333;
+        }
+        .report-header {
+          background: linear-gradient(135deg, #3498db, #2c3e50);
+          color: white;
+          padding: 30px;
+          border-radius: 8px;
+          margin-bottom: 30px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+          font-size: 2.5rem;
+          margin-bottom: 5px;
+          font-weight: 600;
+        }
+        .subtitle {
+          font-size: 1.1rem;
+          opacity: 0.9;
+          margin-bottom: 20px;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+          background-color: white;
+          border-radius: 8px;
+          overflow: hidden;
+          margin-bottom: 30px;
+        }
+        th {
+          background: linear-gradient(to bottom, #f8f9fa, #e9ecef);
+          color: #2c3e50;
+          font-weight: 600;
+          padding: 15px;
+          text-align: left;
+          border-bottom: 2px solid #dee2e6;
+          font-size: 1.05rem;
+        }
+        tr:nth-child(even) {
+          background-color: #f8f9fa;
+        }
+        tr:hover {
+          background-color: #e9f7fe;
+          transition: background-color 0.3s;
+        }
+        td {
+          padding: 12px 15px;
+          border-bottom: 1px solid #dee2e6;
+          color: #495057;
+        }
+        .compliant {
+          background-color: #d4edda;
+          color: #155724;
+          font-weight: 600;
+          padding: 5px 15px;
+          border-radius: 20px;
+          text-align: center;
+          display: inline-block;
+          width: 120px;
+        }
+        .non-compliant {
+          background-color: #f8d7da;
+          color: #721c24;
+          font-weight: 600;
+          padding: 5px 15px;
+          border-radius: 20px;
+          text-align: center;
+          display: inline-block;
+          width: 120px;
+        }
+        .unknown {
+          background-color: #fff3cd;
+          color: #856404;
+          font-weight: 600;
+          padding: 5px 15px;
+          border-radius: 20px;
+          text-align: center;
+          display: inline-block;
+          width: 120px;
+        }
+        .summary-card {
+          background-color: white;
+          border-radius: 8px;
+          padding: 20px;
+          margin-bottom: 30px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .summary-stats {
+          display: flex;
+          justify-content: space-around;
+          text-align: center;
+          margin-top: 20px;
+        }
+        .stat {
+          padding: 15px;
+        }
+        .stat-value {
+          font-size: 2rem;
+          font-weight: 700;
+          color: #3498db;
+        }
+        .stat-label {
+          color: #6c757d;
+          font-size: 0.9rem;
+        }
+        .footer {
+          margin-top: 30px;
+          text-align: center;
+          color: #6c757d;
+          font-size: 0.9rem;
+          padding: 15px;
+          border-top: 1px solid #eee;
+        }
+        .logo {
+          float: right;
+          margin-top: 10px;
+        }
+        .status-icon {
+          font-size: 1.2em;
+          margin-right: 5px;
+        }
+      </style>
+
+  tasks:
+    - name: Calculate compliance statistics
+      ansible.builtin.set_fact:
+        compliant_count: "{{ ansible_play_hosts | selectattr('hostvars', 'defined') | map(attribute='hostvars') | selectattr('compliance_status', 'defined') | selectattr('compliance_status', 'eq', 'compliant') | list | count }}"
+        non_compliant_count: "{{ ansible_play_hosts | selectattr('hostvars', 'defined') | map(attribute='hostvars') | selectattr('compliance_status', 'defined') | selectattr('compliance_status', 'eq', 'non-compliant') | list | count }}"
+        unknown_count: "{{ ansible_play_hosts | selectattr('hostvars', 'defined') | map(attribute='hostvars') | selectattr('compliance_status', 'defined') | selectattr('compliance_status', 'eq', 'unknown') | list | count }}"
+
+    - name: Generate HTML report
+      ansible.builtin.copy:
+        dest: "{{ html_file }}"
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Server Compliance Report</title>
+            {{ styles }}
+          </head>
+          <body>
+            <div class="logo">
+              <svg width="80" height="80" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="45" fill="#3498db" opacity="0.8" />
+                <path d="M30,40 L70,40 L70,60 L30,60 Z" fill="white" />
+                <circle cx="50" cy="40" r="10" fill="white" />
+                <circle cx="50" cy="60" r="10" fill="white" />
+              </svg>
+            </div>
+            
+            <div class="report-header">
+              <h1>Server Compliance Report</h1>
+              <p class="subtitle">Comprehensive server health and patch status</p>
+            </div>
+            
+            <div class="summary-card">
+              <h2>Report Summary</h2>
+              <div class="summary-stats">
+                <div class="stat">
+                  <div class="stat-value">{{ ansible_play_hosts | length }}</div>
+                  <div class="stat-label">Servers Scanned</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">{{ compliant_count }}</div>
+                  <div class="stat-label">Compliant Systems</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">{{ non_compliant_count }}</div>
+                  <div class="stat-label">Non-Compliant</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">{{ unknown_count }}</div>
+                  <div class="stat-label">Unknown Status</div>
+                </div>
+              </div>
+            </div>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th>Server IP</th>
+                  <th>Server Name</th>
+                  <th>OS Version</th>
+                  <th>Kernel Version</th>
+                  <th>Uptime</th>
+                  <th>Compliance Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for host in ansible_play_hosts %}
+                {% set vars = hostvars[host] %}
+                <tr>
+                  <td>{{ vars.ansible_default_ipv4.address | default('N/A') }}</td>
+                  <td>{{ vars.ansible_hostname }}</td>
+                  <td>{{ vars.ansible_distribution | default('Unknown') }} {{ vars.ansible_distribution_version | default('') }}</td>
+                  <td>{{ vars.ansible_kernel | default('N/A') }}</td>
+                  <td>{{ vars.uptime_human | default('N/A') }}</td>
+                  <td>
+                    {% if vars.compliance_status == 'compliant' %}
+                      <span class="compliant">✓ Compliant</span>
+                    {% elif vars.compliance_status == 'non-compliant' %}
+                      <span class="non-compliant">✗ Non-Compliant</span>
+                    {% else %}
+                      <span class="unknown">? Unknown</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            
+            <div class="footer">
+              Generated on {{ ansible_date_time.date }} at {{ ansible_date_time.time }} | 
+              Compliance Check System v1.0
+            </div>
+          </body>
+          </html>
+
+    - name: Convert HTML to Excel (requires LibreOffice)
+      ansible.builtin.command:
+        cmd: "soffice --convert-to xlsx --outdir {{ report_dir }} {{ html_file }} --headless"
+      changed_when: false
+      register: convert_result
+      ignore_errors: true
+
+    - name: Show report paths
+      ansible.builtin.debug:
+        msg: |
+          Compliance reports generated:
+          - HTML: {{ html_file }}
+          {% if convert_result.rc == 0 %}
+          - Excel: {{ excel_file }}
+          {% else %}
+          - Excel conversion failed. Install LibreOffice for Excel support.
+          {% endif %}
