@@ -19,7 +19,7 @@
     - name: Collect compliance status from site.fact
       become: yes
       ansible.builtin.shell: |
-        cat /etc/ansible/fact.d/site.fact 2>/dev/null | grep -i patchcompliance || echo "patchcompliance=unknown"
+        cat /etc/ansible/facts.d/site.fact 2>/dev/null | grep -i patchcompliance || echo "patchcompliance=unknown"
       register: compliance_raw
       changed_when: false
 
